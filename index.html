@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AppALG</title>
+    <!-- Webex Embedded App SDK -->
+    <script src="https://binaries.webex.com/static-system-lib/webex-embedded-app-sdk/v1/webex-embedded-app.min.js" defer></script>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Google Fonts: Inter -->
@@ -11,19 +13,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* Use the Inter font family */
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f3f4f6; /* A light gray background */
-        }
-        /* Simple transition for button hover effects */
-        .btn {
-            transition: all 0.2s ease-in-out;
-        }
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .btn { transition: all 0.2s ease-in-out; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
@@ -52,12 +44,11 @@
                         <thead class="bg-gray-200">
                             <tr>
                                 <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700 uppercase">Tâche</th>
-                                <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700 uppercase">Attribué à (ID Utilisateur)</th>
+                                <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700 uppercase">Attribué à</th>
                                 <th class="py-3 px-4 text-center text-sm font-semibold text-gray-700 uppercase">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="assignment-table-body" class="divide-y divide-gray-200">
-                            <!-- Assignment rows will be dynamically inserted here -->
                             <tr>
                                 <td colspan="3" class="py-4 px-4 text-center text-gray-500">Chargement des tâches...</td>
                             </tr>
@@ -67,12 +58,10 @@
             </section>
         </main>
         
-        <!-- User Info Footer -->
         <footer class="text-center mt-8 text-sm text-gray-500">
-            <p>Votre ID Utilisateur : <span id="user-id-display" class="font-mono bg-gray-200 p-1 rounded"></span></p>
-             <p class="mt-2">Partagez votre ID avec les autres pour qu'ils puissent vous assigner des tâches.</p>
+            <p>Connecté en tant que : <span id="user-id-display" class="font-mono bg-gray-200 p-1 rounded"></span></p>
+             <p class="mt-2" id="sharing-info">Partagez votre ID avec les autres pour qu'ils puissent vous assigner des tâches.</p>
         </footer>
-
     </div>
 
     <!-- Modal for Manual Assignment -->
@@ -80,9 +69,16 @@
         <div class="bg-white rounded-lg shadow-xl p-6 w-11/12 max-w-md">
             <h3 class="text-xl font-semibold mb-4">Attribuer Manuellement</h3>
             <p class="mb-2">Tâche : <span id="modal-task-name" class="font-bold"></span></p>
-            <div class="mb-4">
+            <!-- Input for User ID (fallback) -->
+            <div id="manual-id-container" class="mb-4">
                 <label for="manual-user-id" class="block text-sm font-medium text-gray-700 mb-1">Entrez l'ID de l'utilisateur à attribuer :</label>
                 <input type="text" id="manual-user-id" placeholder="Collez l'ID utilisateur ici" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <!-- Dropdown for Webex Members -->
+            <div id="webex-members-container" class="mb-4 hidden">
+                 <label for="webex-members-select" class="block text-sm font-medium text-gray-700 mb-1">Sélectionnez un membre de l'espace :</label>
+                 <select id="webex-members-select" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                 </select>
             </div>
             <div class="flex justify-end gap-3">
                 <button id="cancel-assign-btn" class="btn px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400">Annuler</button>
@@ -91,69 +87,50 @@
         </div>
     </div>
 
-
-    <!-- Firebase App (the core Firebase SDK) is always required and must be listed first -->
     <script type="module">
-        // Import necessary Firebase modules
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        // **FIX 1**: Added onAuthStateChanged to the import statement.
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, addDoc, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- 1. CONFIGURATION ---
-        
-        // These tasks are hard-coded for simplicity. You can change or add to this list.
-        const TASKS = [
-            'Salle 21', 'Salle 22', 'Salle 17', 'Déchocage', 'TEV', 'END salle 7-11', 'Pause repas', 'Réunion'
-        ];
-
-        // --- 2. FIREBASE SETUP ---
-
-        // These variables are provided by the hosting environment.
+        const TASKS = ['Salle 21', 'Salle 22', 'Salle 17', 'Déchocage', 'TEV', 'END salle 7-11', 'Pause repas', 'Réunion'];
+        // **FIX 2**: Restored your personal Firebase configuration.
         const firebaseConfig = {
-  apiKey: "AIzaSyB4VUzHWBF7RGW4kzg2aCrAbZRgqqLjDSU",
-  authDomain: "appalg-2e444.firebaseapp.com",
-  projectId: "appalg-2e444",
-  storageBucket: "appalg-2e444.firebasestorage.app",
-  messagingSenderId: "140197088575",
-  appId: "1:140197088575:web:73d716a86c64ed5de8178a",
-  measurementId: "G-G2MPYXC0CZ"
-};
-        // Use a unique ID for your app's data in the database
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'app-alg';
+            apiKey: "AIzaSyB4VUzHWBF7RGW4kzg2aCrAbZRgqqLjDSU",
+            authDomain: "appalg-2e444.firebaseapp.com",
+            projectId: "appalg-2e444",
+            storageBucket: "appalg-2e444.appspot.com",
+            messagingSenderId: "140197088575",
+            appId: "1:140197088575:web:73d716a86c64ed5de8178a",
+            measurementId: "G-G2MPYXC0CZ"
+        };
+        const appId = 'app-alg';
         
-        let app, auth, db, userId;
-
-        // Initialize Firebase
-        try {
-            app = initializeApp(firebaseConfig);
-            auth = getAuth(app);
-            db = getFirestore(app);
-        } catch (e) {
-            console.error("Error initializing Firebase:", e);
-            document.getElementById('app').innerHTML = '<p class="text-center text-red-500">Erreur : Impossible de se connecter à la base de données. Veuillez vérifier la console pour plus de détails.</p>';
-        }
-
+        // --- 2. GLOBAL VARIABLES ---
+        let app, auth, db, userId, userName;
+        let isInWebex = false;
+        let webexSpaceMembers = [];
 
         // --- 3. DOM ELEMENT REFERENCES ---
-
+        const userIdDisplay = document.getElementById('user-id-display');
+        const sharingInfo = document.getElementById('sharing-info');
         const taskListDiv = document.getElementById('task-list');
         const assignmentTableBody = document.getElementById('assignment-table-body');
-        const userIdDisplay = document.getElementById('user-id-display');
         const modal = document.getElementById('manual-assign-modal');
         const modalTaskName = document.getElementById('modal-task-name');
+        const manualIdContainer = document.getElementById('manual-id-container');
+        const webexMembersContainer = document.getElementById('webex-members-container');
+        const manualUserIdInput = document.getElementById('manual-user-id');
+        const webexMembersSelect = document.getElementById('webex-members-select');
         const cancelBtn = document.getElementById('cancel-assign-btn');
         const confirmBtn = document.getElementById('confirm-assign-btn');
-        const manualUserIdInput = document.getElementById('manual-user-id');
         let taskToManuallyAssign = null;
-
 
         // --- 4. CORE FUNCTIONS ---
 
-        /**
-         * Renders the list of available tasks as buttons.
-         */
         function renderTasks() {
-            taskListDiv.innerHTML = ''; // Clear existing tasks
+            taskListDiv.innerHTML = '';
             TASKS.forEach(task => {
                 const buttonContainer = document.createElement('div');
                 buttonContainer.className = 'flex flex-col items-center';
@@ -161,7 +138,7 @@
                 const selfAssignButton = document.createElement('button');
                 selfAssignButton.textContent = task;
                 selfAssignButton.className = 'btn w-full bg-indigo-600 text-white font-semibold py-2 px-3 rounded-lg shadow-sm hover:bg-indigo-700';
-                selfAssignButton.onclick = () => assignTask(task, userId);
+                selfAssignButton.onclick = () => assignTask(task, userId, userName);
                 
                 const manualAssignLink = document.createElement('button');
                 manualAssignLink.textContent = 'Attribuer à un autre...';
@@ -174,12 +151,8 @@
             });
         }
 
-        /**
-         * Renders the current list of assignments in the table.
-         * @param {Array} assignments - An array of assignment objects from Firestore.
-         */
         function renderAssignments(assignments) {
-            assignmentTableBody.innerHTML = ''; // Clear the table
+            assignmentTableBody.innerHTML = '';
             if (assignments.length === 0) {
                 assignmentTableBody.innerHTML = '<tr><td colspan="3" class="py-4 px-4 text-center text-gray-500">Aucune tâche attribuée pour le moment.</td></tr>';
                 return;
@@ -192,20 +165,20 @@
                 taskCell.className = 'py-3 px-4 font-medium';
                 taskCell.textContent = assignment.task;
                 
+                // Show user name, fallback to user ID
                 const userCell = document.createElement('td');
-                userCell.className = 'py-3 px-4 text-gray-600 font-mono text-sm';
-                userCell.textContent = assignment.userId;
+                userCell.className = 'py-3 px-4 text-gray-600';
+                userCell.textContent = assignment.userName || assignment.userId;
                 
                 const actionCell = document.createElement('td');
                 actionCell.className = 'py-3 px-4 text-center';
-                
-                if (assignment.userId === userId) {
-                    const removeButton = document.createElement('button');
-                    removeButton.textContent = 'Retirer';
-                    removeButton.className = 'btn bg-red-500 text-white text-xs font-bold py-1 px-3 rounded-full hover:bg-red-600';
-                    removeButton.onclick = () => removeAssignment(assignment.id);
-                    actionCell.appendChild(removeButton);
-                }
+
+                // Anyone can remove the task.
+                const removeButton = document.createElement('button');
+                removeButton.textContent = 'Retirer';
+                removeButton.className = 'btn bg-red-500 text-white text-xs font-bold py-1 px-3 rounded-full hover:bg-red-600';
+                removeButton.onclick = () => removeAssignment(assignment.id);
+                actionCell.appendChild(removeButton);
 
                 row.appendChild(taskCell);
                 row.appendChild(userCell);
@@ -214,61 +187,34 @@
             });
         }
 
-        /**
-         * Saves a new task assignment to the Firestore database.
-         * @param {string} task - The name of the task.
-         * @param {string} assignedUserId - The ID of the user being assigned.
-         */
-        async function assignTask(task, assignedUserId) {
-            if (!task || !assignedUserId) {
-                console.error("Task name and User ID are required to assign a task.");
-                return;
-            }
+        async function assignTask(task, assignedUserId, assignedUserName) {
+            if (!task || !assignedUserId) { return; }
             try {
                 const collectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'assignments');
                 await addDoc(collectionRef, {
                     task: task,
                     userId: assignedUserId,
+                    userName: assignedUserName || assignedUserId, // Fallback to ID if name is not provided
                     createdAt: new Date()
                 });
-                console.log(`Task '${task}' assigned to user '${assignedUserId}'`);
-            } catch (error) {
-                console.error("Error adding document: ", error);
-            }
+            } catch (error) { console.error("Error adding document: ", error); }
         }
 
-        /**
-         * Removes a task assignment from the Firestore database.
-         * @param {string} docId - The ID of the Firestore document to delete.
-         */
         async function removeAssignment(docId) {
             try {
                 const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'assignments', docId);
                 await deleteDoc(docRef);
-                console.log(`Assignment with ID '${docId}' removed.`);
-            } catch (error) {
-                console.error("Error removing document: ", error);
-            }
+            } catch (error) { console.error("Error removing document: ", error); }
         }
 
-        /**
-         * Sets up a real-time listener for changes in the assignments collection.
-         */
         function listenForAssignments() {
-            const collectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'assignments');
-            const q = query(collectionRef); 
-
+            const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'assignments'));
             onSnapshot(q, (querySnapshot) => {
                 const assignments = [];
-                querySnapshot.forEach((doc) => {
-                    assignments.push({ id: doc.id, ...doc.data() });
-                });
+                querySnapshot.forEach((doc) => assignments.push({ id: doc.id, ...doc.data() }));
                 assignments.sort((a, b) => a.task.localeCompare(b.task));
                 renderAssignments(assignments);
-            }, (error) => {
-                console.error("Error listening for snapshot changes:", error);
-                assignmentTableBody.innerHTML = '<tr><td colspan="3" class="text-center text-red-500">Erreur lors du chargement des données.</td></tr>';
-            });
+            }, (error) => { console.error("Error listening for snapshots:", error); });
         }
         
         // --- 5. MODAL HANDLING ---
@@ -276,7 +222,26 @@
         function openManualAssignModal(task) {
             taskToManuallyAssign = task;
             modalTaskName.textContent = task;
-            manualUserIdInput.value = '';
+
+            if (isInWebex) {
+                // Populate dropdown with Webex members
+                webexMembersSelect.innerHTML = '';
+                webexSpaceMembers.forEach(member => {
+                    const option = document.createElement('option');
+                    option.value = member.id;
+                    option.textContent = member.displayName;
+                    option.dataset.displayName = member.displayName; // Store name for later
+                    webexMembersSelect.appendChild(option);
+                });
+                manualIdContainer.classList.add('hidden');
+                webexMembersContainer.classList.remove('hidden');
+            } else {
+                // Fallback to manual ID input
+                manualUserIdInput.value = '';
+                manualIdContainer.classList.remove('hidden');
+                webexMembersContainer.classList.add('hidden');
+            }
+            
             modal.classList.remove('hidden');
             modal.classList.add('flex');
         }
@@ -290,41 +255,93 @@
         cancelBtn.onclick = closeManualAssignModal;
 
         confirmBtn.onclick = () => {
-            const userToAssign = manualUserIdInput.value.trim();
-            if (userToAssign && taskToManuallyAssign) {
-                assignTask(taskToManuallyAssign, userToAssign);
-                closeManualAssignModal();
+            if (!taskToManuallyAssign) return;
+
+            if (isInWebex) {
+                const selectedOption = webexMembersSelect.options[webexMembersSelect.selectedIndex];
+                const userToAssignId = selectedOption.value;
+                const userToAssignName = selectedOption.dataset.displayName;
+                assignTask(taskToManuallyAssign, userToAssignId, userToAssignName);
             } else {
-                manualUserIdInput.classList.add('border-red-500');
-                setTimeout(()=> manualUserIdInput.classList.remove('border-red-500'), 2000);
-            }
-        };
-
-
-        // --- 6. AUTHENTICATION & INITIALIZATION ---
-
-        onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                userId = user.uid;
-                userIdDisplay.textContent = userId;
-                renderTasks();
-                listenForAssignments();
-
-            } else {
-                console.log("No user found, attempting to sign in...");
-                try {
-                     const initialToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-                    if (initialToken) {
-                        await signInWithCustomToken(auth, initialToken);
-                    } else {
-                        await signInAnonymously(auth);
-                    }
-                } catch (error) {
-                    console.error("Error during sign-in:", error);
-                    document.getElementById('app').innerHTML = '<p class="text-center text-red-500">L\'authentification a échoué. L\'application ne peut pas démarrer.</p>';
+                const userToAssignId = manualUserIdInput.value.trim();
+                if (userToAssignId) {
+                    assignTask(taskToManuallyAssign, userToAssignId, userToAssignId);
                 }
             }
-        });
+            closeManualAssignModal();
+        };
+
+        // --- 6. INITIALIZATION LOGIC ---
+
+        function startApplication() {
+            // Initialize Firebase
+            try {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+            } catch (e) {
+                console.error("Firebase Init Error:", e);
+                document.body.innerHTML = '<p class="text-center text-red-500 p-8">Erreur de configuration Firebase. Avez-vous remplacé les clés de configuration ?</p>';
+                return;
+            }
+
+            // Authenticate with Firebase
+            signInAnonymously(auth).catch((error) => {
+                console.error("Firebase Auth Error:", error);
+                document.body.innerHTML = '<p class="text-center text-red-500 p-8">L\'authentification a échoué. Avez-vous activé l\'authentification Anonyme dans votre projet Firebase ?</p>';
+            });
+
+            // Listen for user state
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    if (!isInWebex) {
+                        // If not in webex, the user ID is the anonymous firebase ID
+                        userId = user.uid;
+                        userName = user.uid.substring(0, 8) + '...'; // Shortened for display
+                    }
+                    // Update UI with user info
+                    userIdDisplay.textContent = userName;
+                    sharingInfo.classList.toggle('hidden', isInWebex); // Hide sharing info in Webex
+                    
+                    // Start the main app logic
+                    renderTasks();
+                    listenForAssignments();
+                }
+            });
+        }
+
+        // --- 7. WEBEX SDK INITIALIZATION ---
+
+        // This block runs after the rest of the script. The `defer` attribute on the script tag is important.
+        if (window.Webex) {
+            const webexApp = new window.Webex.Application();
+            webexApp.onReady().then(() => {
+                isInWebex = true;
+                // Get Webex context
+                Promise.all([
+                    webexApp.context.getUser(),
+                    webexApp.context.getMembers()
+                ]).then(([user, members]) => {
+                    // In Webex, we use the Webex Person ID as the primary identifier
+                    userId = user.id;
+                    userName = user.displayName;
+                    webexSpaceMembers = members;
+                    startApplication(); // Start the app with Webex context
+                }).catch((error) => {
+                    console.error("Webex SDK Context Error: ", error);
+                    // Fallback to non-webex mode if context fails
+                    isInWebex = false;
+                    startApplication();
+                });
+            }).catch((error) => {
+                 console.error("Webex SDK Init Error: ", error);
+                 isInWebex = false;
+                 startApplication();
+            });
+        } else {
+            // If not in Webex, start the application in standalone mode
+            startApplication();
+        }
 
     </script>
 </body>
